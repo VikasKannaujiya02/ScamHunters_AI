@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+requests
+python-dotenv
+pandas
+openpyxl
+gtts
+pillow
+streamlit
+plotly
+google-generativeai
+python-multipart
