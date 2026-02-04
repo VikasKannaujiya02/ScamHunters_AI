@@ -9,7 +9,7 @@ load_dotenv()
 if "GEMINI_API_KEY" not in os.environ:
     os.environ["AIzaSyCxbcXZIeSusFN0sp-LXWnd2Q3coVny5QQ"] = "AIzaSy..." # Yahan apni Key daalo agar .env nahi chal raha
 
-genai.configure(api_key=os.environ["AIzaSyCxbcXZIeSusFN0sp-LXWnd2Q3coVny5QQ"])
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
 # --- THE 4 PERSONAS (Characters) ---
 PERSONAS = {
@@ -79,4 +79,5 @@ def get_agent_response(history, user_text):
         return current_char, reply
     except:
         # Fallback agar API fail ho
+
         return "Savitri", "Beta internet slow hai... ek min ruko..."
