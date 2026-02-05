@@ -8,5 +8,6 @@ gtts
 pillow
 streamlit
 plotly
-google-generativeai
+google-genai
+
 python-multipart
