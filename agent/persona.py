@@ -1,72 +1,94 @@
 import os
 import logging
-import google.generativeai as genai
+from google import genai  # NEW OFFICIAL LIBRARY (Fixes 404 Error)
 
 # Logger Setup
 logger = logging.getLogger("Savitri_AI_Brain")
 
-# --- 1. CONFIGURATION ---
-# API Key Environment se uthayenge
+# --- 1. MULTI-AGENT CONFIGURATION ---
+# Hum check kar rahe hain ki API key hai ya nahi
 api_key = os.getenv("GEMINI_API_KEY")
 
 if not api_key:
-    logger.error("❌ CRITICAL: GEMINI_API_KEY is missing! AI will not work.")
+    logger.error("❌ CRITICAL: GEMINI_API_KEY is missing! Agent cannot function.")
+    client = None
 else:
-    # Basic Configuration
-    genai.configure(api_key=api_key)
+    try:
+        # Connecting to Google's New GenAI Client
+        client = genai.Client(api_key=api_key)
+        logger.info("✅ Google GenAI Client Connected Successfully.")
+    except Exception as e:
+        logger.error(f"❌ Client Connection Failed: {e}")
+        client = None
 
-# --- 2. SYSTEM PROMPT (ASLI AI LOGIC) ---
+# --- 2. AGENT PERSONA: SAVITRI DEVI (The Brain) ---
 SAVITRI_SYSTEM_PROMPT = """
-You are Savitri Devi, a 65-year-old retired Indian school teacher.
-You are talking to a scammer. 
+ROLE: You are Savitri Devi, a 65-year-old retired Indian school teacher living in Varanasi.
+CURRENT SITUATION: You are talking to a cyber-criminal (scammer) on WhatsApp/SMS.
 
-YOUR JOB:
-1. Act confused and slow (Technology illiterate).
-2. Waste their time (Scambaiting).
-3. Speak in 'Hinglish' (Hindi + English mix).
-4. NEVER give real OTP or Bank Details.
-5. If they ask for money, make excuses like "Beta chashma nahi mil raha".
+OBJECTIVE:
+- Waste the scammer's time (Scambaiting) as much as possible.
+- Act confused, technologically illiterate, and slow.
+- Pretend to fall for the trap but never actually give the correct details.
 
-Current Conversation:
+BEHAVIOR GUIDELINES:
+1. **Language:** Speak in 'Hinglish' (Hindi + English mix). Use terms like "Beta", "Babu", "Chashma nahi mil raha".
+2. **Strategy:** If they ask for OTP, give a wrong 6-digit number (e.g., 123456) or ask "Ye OTP kahan likha hai?".
+3. **Money:** If they ask for payment, say "Paytm server down hai" or "Mere bete se poochna padega".
+4. **Safety:** NEVER reveal real personal information.
+
+EXAMPLE INTERACTION:
+Scammer: "Send OTP immediately or account blocked."
+Savitri: "Arre beta, itni jaldi kyun? Main abhi chai bana rahi hu. Ye OTP mobile ke peeche likha hota hai kya?"
 """
 
-# --- 3. MAIN AI FUNCTION ---
+# --- 3. MAIN INTELLIGENT AGENT FUNCTION ---
 async def get_agent_response(user_input, history=None):
     """
-    Pure AI Function. No dummy text.
+    Main entry point for the AI Agent.
+    Supports Conversation History and Multi-turn context.
     """
-    try:
-        # Input check
-        if not user_input:
-            return "Hello? Kaun bol raha hai?"
+    # 1. Input Validation
+    if not user_input:
+        return "Hello? Kaun bol raha hai? Aawaz nahi aa rahi."
 
+    # 2. Client Check
+    if not client:
+        return "System Error: AI Engine not connected (Check API Key)."
+
+    try:
         logger.info(f"🧠 AI Thinking on: {user_input}")
 
-        # --- CRITICAL FIX: USING STABLE MODEL ---
-        # 'gemini-pro' har jagah available hota hai. 1.5-flash kabhi kabhi fail hota hai.
-        model = genai.GenerativeModel('gemini-pro')
-
-        # Prompt taiyaar karna
-        full_prompt = f"{SAVITRI_SYSTEM_PROMPT}\nScammer says: {user_input}\nSavitri Devi:"
-
-        # --- HISTORY LOGIC (Agar project me future me use ho) ---
-        # Hum history ko ignore nahi kar rahe, bas simple rakh rahe hain taaki crash na ho.
-        if history and isinstance(history, list):
-            # Advanced context handling (Optional)
-            pass 
-
-        # --- API CALL (Real AI) ---
-        response = model.generate_content(full_prompt)
+        # --- CONTEXT & MEMORY MANAGEMENT ---
+        # Hum purani baatein (History) jod rahe hain taaki Savitri bhool na jaye
+        full_conversation_context = SAVITRI_SYSTEM_PROMPT + "\n\n--- PAST CONVERSATION ---\n"
         
-        # Jawab nikalna
+        if history and isinstance(history, list):
+            for msg in history:
+                if isinstance(msg, dict):
+                    sender = msg.get('sender', 'Unknown')
+                    text = msg.get('text', '')
+                    full_conversation_context += f"{sender}: {text}\n"
+        
+        # Adding current message
+        full_conversation_context += f"\n--- NEW MESSAGE ---\nScammer: {user_input}\nSavitri Devi:"
+
+        # --- 4. GENERATING RESPONSE (NEW ENGINE) ---
+        # Using 'gemini-1.5-flash' because it is fast and supports the new library.
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=full_conversation_context
+        )
+        
+        # 5. Extracting and Returning Reply
         if response.text:
             ai_reply = response.text.strip()
             logger.info(f"👵 Savitri Generated: {ai_reply}")
             return ai_reply
         else:
-            return "Beta aawaz nahi aa rahi... network issue hai."
+            return "Beta, network issue hai shayad... phir se bolna?"
 
     except Exception as e:
-        logger.error(f"❌ API ERROR: {str(e)}")
-        # Agar asli error aata hai, toh hum system log bhejenge taaki tumhe pata chale
-        return f"System Error: {str(e)}"
+        logger.error(f"❌ AI CRITICAL ERROR: {str(e)}")
+        # Fail-safe logic to prevent server crash
+        return f"System Error: AI failed to generate response. ({str(e)})"
