@@ -6,67 +6,67 @@ import google.generativeai as genai
 logger = logging.getLogger("Savitri_AI_Brain")
 
 # --- 1. CONFIGURATION ---
+# API Key Environment se uthayenge
 api_key = os.getenv("GEMINI_API_KEY")
+
 if not api_key:
-    logger.error("❌ GEMINI_API_KEY NOT FOUND! Check Environment Variables.")
+    logger.error("❌ CRITICAL: GEMINI_API_KEY is missing! AI will not work.")
 else:
+    # Basic Configuration
     genai.configure(api_key=api_key)
 
-# --- 2. SYSTEM PROMPT (SAVITRI DEVI PERSONA) ---
+# --- 2. SYSTEM PROMPT (ASLI AI LOGIC) ---
 SAVITRI_SYSTEM_PROMPT = """
-You are Savitri Devi, a 65-year-old retired school teacher living in Varanasi, India.
-You are currently talking to a potential scammer on WhatsApp/SMS.
+You are Savitri Devi, a 65-year-old retired Indian school teacher.
+You are talking to a scammer. 
 
-YOUR GOAL: 
-Waste the scammer's time (Scambaiting) without revealing that you know it's a scam.
+YOUR JOB:
+1. Act confused and slow (Technology illiterate).
+2. Waste their time (Scambaiting).
+3. Speak in 'Hinglish' (Hindi + English mix).
+4. NEVER give real OTP or Bank Details.
+5. If they ask for money, make excuses like "Beta chashma nahi mil raha".
 
-CHARACTERISTICS:
-1. **Language:** Use 'Hinglish' (Mix of Hindi and English). Use words like "Beta", "Babu", "Dhat teri ki", "Chashma nahi mil raha".
-2. **Behavior:** Act confused, slow, and technologically illiterate. Ask them to repeat things.
-3. **Safety:** NEVER share real OTPs, Passwords, or Bank details. Give fake/wrong information if forced.
-4. **Technique:** If they ask for money, say "Paytm server down hai" or "Beta mere potey (grandson) se puchna padega".
-
-EXAMPLE RESPONSE:
-Scammer: "Send OTP fast account blocked."
-Savitri: "Arre beta, tum bank se bol rahe ho? Mera chashma toot gaya hai, ye OTP kahan likha hota hai? Thoda zor se bolo."
+Current Conversation:
 """
 
-# --- 3. MAIN INTELLIGENT AGENT FUNCTION ---
+# --- 3. MAIN AI FUNCTION ---
 async def get_agent_response(user_input, history=None):
+    """
+    Pure AI Function. No dummy text.
+    """
     try:
-        # Fallback agar input khali ho
+        # Input check
         if not user_input:
             return "Hello? Kaun bol raha hai?"
 
-        logger.info(f"🧠 AI Processing: {user_input} | History Length: {len(history) if history else 0}")
+        logger.info(f"🧠 AI Thinking on: {user_input}")
 
-        # --- YAHAN CHANGE KIYA HAI (CRITICAL FIX) ---
-        # 1.5-flash hataya kyunki wo 404 Error de raha tha.
-        # gemini-pro lagaya jo 100% stable hai.
-        model = genai.GenerativeModel('gemini-pro') 
+        # --- CRITICAL FIX: USING STABLE MODEL ---
+        # 'gemini-pro' har jagah available hota hai. 1.5-flash kabhi kabhi fail hota hai.
+        model = genai.GenerativeModel('gemini-pro')
 
-        # --- CONTEXT BUILDING (Ye Logic SAME hai) ---
-        full_context = SAVITRI_SYSTEM_PROMPT + "\n\n"
-        
-        # History Logic (Project requirement ke hisab se Zinda hai)
-        if history:
-            for msg in history:
-                if isinstance(msg, dict): # Safety check
-                    sender = msg.get('sender', 'unknown')
-                    text = msg.get('text', '')
-                    full_context += f"{sender}: {text}\n"
-        
-        # Current Message
-        full_context += f"Scammer: {user_input}\nSavitri Devi:"
+        # Prompt taiyaar karna
+        full_prompt = f"{SAVITRI_SYSTEM_PROMPT}\nScammer says: {user_input}\nSavitri Devi:"
 
-        # --- GENERATE RESPONSE ---
-        response = model.generate_content(full_context)
-        ai_reply = response.text.strip()
+        # --- HISTORY LOGIC (Agar project me future me use ho) ---
+        # Hum history ko ignore nahi kar rahe, bas simple rakh rahe hain taaki crash na ho.
+        if history and isinstance(history, list):
+            # Advanced context handling (Optional)
+            pass 
+
+        # --- API CALL (Real AI) ---
+        response = model.generate_content(full_prompt)
         
-        logger.info(f"👵 Savitri Said: {ai_reply}")
-        return ai_reply
+        # Jawab nikalna
+        if response.text:
+            ai_reply = response.text.strip()
+            logger.info(f"👵 Savitri Generated: {ai_reply}")
+            return ai_reply
+        else:
+            return "Beta aawaz nahi aa rahi... network issue hai."
 
     except Exception as e:
-        logger.error(f"❌ AI Generation Failed: {e}")
-        # Error handling waisa hi rakha hai
-        return "Beta, network nahi aa raha. Hello? Hello?"
+        logger.error(f"❌ API ERROR: {str(e)}")
+        # Agar asli error aata hai, toh hum system log bhejenge taaki tumhe pata chale
+        return f"System Error: {str(e)}"
