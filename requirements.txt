@@ -9,5 +9,4 @@ pillow
 streamlit
 plotly
 google-genai
-
 python-multipart
