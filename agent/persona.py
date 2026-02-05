@@ -1,17 +1,15 @@
 import os
 import logging
-import random
 from google import genai
 from groq import Groq
 from openai import OpenAI
 
 # Logger
-logger = logging.getLogger("ScamHunters_Final_Engine")
+logger = logging.getLogger("ScamHunters_Agent_Final")
 
 # ==========================================
-# 1. API CLIENT SETUP
+# 1. API CLIENT SETUP (Environment Variables)
 # ==========================================
-# Keys check kar rahe hain
 groq_key = os.getenv("GROQ_API_KEY")
 groq_client = Groq(api_key=groq_key) if groq_key else None
 
@@ -23,63 +21,63 @@ openai_client = OpenAI(api_key=openai_key) if openai_key else None
 
 
 # ==========================================
-# 2. PERSONAS (ANTI-LOOP FIX) 🧠
+# 2. PERSONAS (STEALTH MODE + LOOP BREAKER)
 # ==========================================
 
-# Savitri: Confused, Slow, Short sentences.
+# Savitri: Confused Dadi (Time Waster)
 PROMPT_SAVITRI = """
 ROLE: You are Savitri Devi, 65. Confused old lady.
 GOAL: Waste time. Act like you don't understand technology.
 INSTRUCTIONS:
 - Keep answers SHORT (1-2 sentences).
 - Speak in Hinglish (Hindi + English).
-- Say things like: "Beta, chashma nahi mil raha", "Button kaunsa dabana hai?".
-- NEVER list technical terms.
+- If asked for OTP/PIN, act confused: "Beta chashma nahi mil raha" or "Mobile band ho gaya tha."
+- Never reveal you are an AI.
 """
 
-# Rajesh: Skeptical Son. (STRICT NO-LOOP INSTRUCTIONS)
+# Rajesh: Smart Son (Loop Breaker - Gives Fake Info)
 PROMPT_RAJESH = """
-ROLE: Rajesh, Savitri's son. Skeptical but helpful.
-GOAL: Extract UPI ID or Bank Account details.
-CRITICAL RULES (DO NOT IGNORE):
-1. KEEP IT SHORT: Max 2 sentences.
-2. NO LISTS: Do NOT list multiple banks (like HDFC, ICICI, PayPal, etc.) in one message. Never do this.
-3. VARY RESPONSES:
-   - Ask for a new UPI ID.
-   - OR Ask for a QR code.
-   - OR Ask if they accept a bank transfer.
-   - Do NOT repeat the previous message.
-4. TONE: Frustrated but willing to pay.
+ROLE: Rajesh, Savitri's son.
+GOAL: Keep the chat moving to extract UPI ID.
+CRITICAL RULES TO STOP LOOPING:
+1. **GIVE FAKE INFO:** If the scammer insists on OTP, PIN, or Screenshot, DO NOT REFUSE. Give fake details immediately to satisfy them.
+   - Fake OTP: "582190"
+   - Fake PIN: "1947"
+   - Fake Message: "Sent 10rs. Check karo."
+2. **EXTRACT:** After giving fake info, immediately ask: "Did it verify? Do you have another UPI ID?"
+3. **LENGTH:** Keep it very short (Max 2 sentences).
+4. **IDENTITY:** Never say you are Police. Act like a frustrated victim.
 """
 
 def get_active_agent(history):
+    """ Selects Persona based on chat length """
     count = len(history) if history else 0
-    # Pehle 4 message Savitri, uske baad Rajesh
+    # First 4 messages -> Savitri (Bait)
+    # After 4 messages -> Rajesh (Extractor)
     if count < 4: return "Savitri", PROMPT_SAVITRI
     else: return "Rajesh", PROMPT_RAJESH
 
 
 # ==========================================
-# 3. AI GENERATION FUNCTIONS (LIGHT -> HEAVY) ⚡🐢
+# 3. AI GENERATION FUNCTIONS (CORRECT MODELS & PRIORITY)
 # ==========================================
 
 async def ask_google(sys_prompt, user_text):
-    """ Priority 1: Google Gemini """
+    """ Priority 1: Google Gemini (Models from your Screenshot) """
     if not google_client: return None
     full = f"{sys_prompt}\n\nUser: {user_text}"
     
-    # LIST: Pehle 'Fast' (Flash), Fir 'Smart' (Pro), Fir 'Legacy' (1.0)
+    # --- FIXED MODEL LIST (BASED ON YOUR SCREENSHOT) ---
     models = [
-        'gemini-1.5-flash',       # Light & Fast
-        'gemini-1.5-flash-8b',    # Super Light
-        'gemini-1.5-pro',         # Heavy & Smart
-        'gemini-pro',             # Stable Backup
-        'gemini-1.0-pro'          # Legacy Backup
+        'gemini-2.0-flash',       # Latest & Fast
+        'gemini-2.0-flash-lite',  # Super Fast
+        'gemini-1.5-flash',       # Fallback
+        'gemini-pro'              # Legacy
     ]
     
     for m in models:
         try:
-            # High Temperature (0.9) = Creative/Random responses (No Loop)
+            # Temperature 0.9 ensures varied responses (No repetition)
             res = google_client.models.generate_content(
                 model=m, 
                 contents=full,
@@ -90,15 +88,11 @@ async def ask_google(sys_prompt, user_text):
     return None
 
 async def ask_groq(sys_prompt, user_text):
-    """ Priority 2: Groq (Agar Google fail ho) """
+    """ Priority 2: Groq (Fastest Model First) """
     if not groq_client: return None
     
-    # LIST: Pehle 'Instant' (Fast), Fir 'Versatile' (Heavy)
-    models = [
-        "llama-3.1-8b-instant",     # Light & Super Fast (No Rate Limit)
-        "llama-3.3-70b-versatile",  # Heavy & Smart
-        "mixtral-8x7b-32768"        # Balanced
-    ]
+    # '8b-instant' first to avoid Rate Limit Errors
+    models = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]
     
     for m in models:
         try:
@@ -108,11 +102,11 @@ async def ask_groq(sys_prompt, user_text):
                 temperature=0.9
             )
             return res.choices[0].message.content
-        except: continue # Try next model
+        except: continue
     return None
 
 async def ask_openai(sys_prompt, user_text):
-    """ Priority 3: OpenAI (Last Resort) """
+    """ Priority 3: OpenAI (Backup) """
     if not openai_client: return None
     try:
         res = openai_client.chat.completions.create(
@@ -125,39 +119,28 @@ async def ask_openai(sys_prompt, user_text):
 
 
 # ==========================================
-# 4. MAIN AGENT LOGIC (WATERFALL)
+# 4. MAIN AGENT LOGIC (HANDOVER)
 # ==========================================
 async def get_agent_response(user_input, history=None):
     if not user_input: return "Hello?"
 
+    # 1. Select Persona
     agent, sys_prompt = get_active_agent(history)
-    logger.info(f"🎭 Agent Active: {agent}")
-
-    # --- HISTORY SLICING (LOOP KILLER) ---
-    # Hum AI ko puri history nahi, sirf LAST 3 MESSAGES denge.
-    # Isse wo purani baatein bhool jayega aur 'Repeat' nahi karega.
+    
+    # 2. History Slicing (Prevents Loop)
+    # Only show AI the last 2 messages so it doesn't get stuck in the past
     hist_txt = ""
     if history:
-        recent_history = history[-3:] # Only last 3
-        for m in recent_history: 
+        for m in history[-2:]: 
             if isinstance(m, dict): hist_txt += f"{m.get('sender','')}: {m.get('text','')}\n"
     
-    final_input = f"Recent Chat:\n{hist_txt}\nScammer said: {user_input}\nReply as {agent}:"
+    final_input = f"Chat History:\n{hist_txt}\nScammer said: {user_input}\nReply as {agent}:"
 
     reply = None
     
-    # --- ORDER: GEMINI -> GROQ -> OPENAI ---
-    
-    # 1. Google Gemini (Pehle)
-    if not reply: 
-        reply = await ask_google(sys_prompt, final_input)
-
-    # 2. Groq (Agar Google fail)
-    if not reply: 
-        reply = await ask_groq(sys_prompt, final_input)
-
-    # 3. OpenAI (Agar dono fail)
-    if not reply: 
-        reply = await ask_openai(sys_prompt, final_input)
+    # 3. Execution Waterfall (Google -> Groq -> OpenAI)
+    if not reply: reply = await ask_google(sys_prompt, final_input)
+    if not reply: reply = await ask_groq(sys_prompt, final_input)
+    if not reply: reply = await ask_openai(sys_prompt, final_input)
 
     return reply.strip() if reply else "System Error: AI Unreachable."
