@@ -10,7 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 # --- IMPORT AGENT MODULES ---
-# Note: Ensure agent/persona.py has 'detect_scam_with_ai' function
 from agent.persona import get_agent_response, detect_scam_with_ai
 from forensics.bait_gen import generate_fake_payment_screenshot
 
@@ -43,48 +42,58 @@ def init_db():
 
 init_db()
 
-# --- 2. ADVANCED INTELLIGENCE EXTRACTION (CRITERIA 3: 10/10) 🕵️‍♂️ ---
-def extract_intelligence(text):
+# --- 2. INTELLIGENCE EXTRACTION (UPDATED: HISTORY SCAN) 🕵️‍♂️ ---
+def extract_intelligence(current_text, history):
     """
-    Extracts entities using Smart Regex (Handles spaces in numbers, etc.)
+    Extracts entities from BOTH current text AND full conversation history.
+    Fixes the issue where data sent in previous messages was ignored.
     """
-    # Normalize: "9 8 7 6" -> "9876" (Catch spaced numbers)
-    normalized_text = re.sub(r'\s+', '', text)
+    # 1. Combine all Scammer messages into one big text block
+    full_text = current_text + " "
+    if history:
+        for msg in history:
+            if isinstance(msg, dict) and msg.get('sender') == 'scammer':
+                full_text += msg.get('text', '') + " "
+    
+    # 2. Normalize: "9 8 7 6" -> "9876" (Catch spaced numbers)
+    normalized_text = re.sub(r'\s+', '', full_text)
     
     extracted = {
         # Catch standard (+91...) and spaced formats via Normalized text
-        "phoneNumbers": re.findall(r"(\+91)?\d{10}", normalized_text),
+        "phoneNumbers": re.findall(r"(\+91|91)?[6-9]\d{9}", normalized_text),
         
-        # Standard Extraction
-        "upiIds": re.findall(r"[\w\.\-_]+@[\w\.\-_]+", text),
-        "phishingLinks": re.findall(r"(https?://[^\s]+)|(www\.[^\s]+)", text),
+        # Standard Extraction (Relaxed Regex for UPI)
+        "upiIds": re.findall(r"[a-zA-Z0-9\.\-_]+@[a-zA-Z0-9]+", full_text),
+        
+        "phishingLinks": re.findall(r"(https?://[^\s]+)|(www\.[^\s]+)", full_text),
         "bankAccounts": re.findall(r"\b\d{9,18}\b", normalized_text)
     }
     
-    # Filter only valid-looking phone numbers (start with 6-9)
-    extracted["phoneNumbers"] = [p for p in extracted["phoneNumbers"] if len(p) >= 10 and p[-10] in "6789"]
+    # Filter Valid Phone Numbers (Length check)
+    extracted["phoneNumbers"] = list(set([p for p in extracted["phoneNumbers"] if len(p) >= 10]))
+    extracted["upiIds"] = list(set(extracted["upiIds"])) # Remove duplicates
     
-    # Social Engineering Keywords
+    # Social Engineering Keywords (Scan only current text for intent)
     keywords = ["urgent", "police", "block", "verify", "kyc", "otp", "expiry", "jail", "cbi"]
-    extracted["suspiciousKeywords"] = [w for w in keywords if w in text.lower()]
+    extracted["suspiciousKeywords"] = [w for w in keywords if w in current_text.lower()]
     
     return extracted
 
-# --- 3. HANDOVER LOGIC & AI DETECTION (CRITERIA 1 & 2: 10/10) ---
+# --- 3. HANDOVER LOGIC & AI DETECTION ---
 async def handover_to_agent_and_report(session_id, user_text, history):
     """
     Hands over control to AI Agent AND Performs AI-based Scam Detection.
     """
-    # 1. GENERATE RESPONSE (With Full Memory for Engagement)
+    # 1. GENERATE RESPONSE
     ai_reply = await get_agent_response(user_text, history)
     
-    # 2. DETECT SCAM USING AI (NLP MODEL) 🧠
-    # Uses the function from agent/persona.py to analyze intent
+    # 2. DETECT SCAM USING AI (NLP MODEL)
     risk_score = await detect_scam_with_ai(user_text)
     
     # 3. REPORT TO GUVI (Rule 12 Callback)
     try:
-        extracted = extract_intelligence(user_text)
+        # --- FIX: PASS HISTORY TO EXTRACTION ---
+        extracted = extract_intelligence(user_text, history)
         
         # Guvi Payload
         url = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"
@@ -99,7 +108,7 @@ async def handover_to_agent_and_report(session_id, user_text, history):
         # Send Request (Timeout 5s)
         try: 
             requests.post(url, json=payload, timeout=5)
-            logger.info(f"📡 Callback Sent. Risk: {risk_score}")
+            logger.info(f"📡 Callback Sent. Risk: {risk_score} | Data Found: {len(extracted['upiIds'])} UPIs")
         except: 
             pass
         
@@ -120,12 +129,10 @@ async def handover_to_agent_and_report(session_id, user_text, history):
 # --- 4. MAIN API ENDPOINT ---
 @app.api_route("/api/chat", methods=["GET", "POST"])
 async def chat_endpoint(request: Request, background_tasks: BackgroundTasks):
-    # Rule 4: API Key Check
     if request.headers.get("x-api-key") != "12345": 
-        pass # Soft fail for demo purposes
+        pass 
 
     try:
-        # Data Parsing
         try: data = await request.json()
         except: data = dict(await request.form())
         
@@ -133,7 +140,6 @@ async def chat_endpoint(request: Request, background_tasks: BackgroundTasks):
         
         session_id = data.get("sessionId", f"sess_{datetime.datetime.now().timestamp()}")
         
-        # Text Extraction
         user_text = "Hello"
         if "message" in data and isinstance(data["message"], dict):
             user_text = data["message"].get("text", "")
@@ -147,10 +153,8 @@ async def chat_endpoint(request: Request, background_tasks: BackgroundTasks):
 
         # Trigger Bait (Only if high risk detected by AI)
         if risk_score > 75:
-            logger.info("🪤 High Risk Detected: Generating Bait")
             background_tasks.add_task(generate_fake_payment_screenshot, "5000")
 
-        # Final JSON Response
         return {
             "status": "success",
             "reply": ai_reply,
