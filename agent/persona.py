@@ -1,109 +1,164 @@
 import os
 import logging
-from google import genai 
+from google import genai        # New Google Library
+from openai import OpenAI       # OpenAI Library
+from groq import Groq           # Groq Library
 
 # Logger Setup
-logger = logging.getLogger("Savitri_AI_Brain")
+logger = logging.getLogger("ScamHunters_Ultimate")
 
-# --- 1. CONFIGURATION ---
-api_key = os.getenv("GEMINI_API_KEY")
+# ==========================================
+# 1. SETUP ALL AI CLIENTS (MULTI-MODEL)
+# ==========================================
 
-if not api_key:
-    logger.error("❌ CRITICAL: GEMINI_API_KEY is missing! Agent cannot function.")
-    client = None
-else:
+# A. Groq Setup (Priority 1 - Fastest)
+groq_key = os.getenv("GROQ_API_KEY")
+groq_client = None
+if groq_key:
     try:
-        # Connecting to Google's New GenAI Client
-        client = genai.Client(api_key=api_key)
-        logger.info("✅ Google GenAI Client Connected Successfully.")
-    except Exception as e:
-        logger.error(f"❌ Client Connection Failed: {e}")
-        client = None
+        groq_client = Groq(api_key=groq_key)
+        logger.info("✅ Groq Connected.")
+    except: logger.error("❌ Groq Failed.")
 
-# --- 2. ADVANCED PERSONA (The Logic) ---
-# Ye 'Khokhla' nahi hai. Ye AI ko bata raha hai ki kaise behave karna hai.
-SAVITRI_SYSTEM_PROMPT = """
-ROLE: You are Savitri Devi, a 65-year-old retired Indian school teacher living in Varanasi.
-CURRENT SITUATION: You are talking to a cyber-criminal (scammer) on WhatsApp/SMS.
+# B. OpenAI Setup (Priority 2 - Smartest)
+openai_key = os.getenv("OPENAI_API_KEY")
+openai_client = None
+if openai_key:
+    try:
+        openai_client = OpenAI(api_key=openai_key)
+        logger.info("✅ OpenAI Connected.")
+    except: logger.error("❌ OpenAI Failed.")
 
-OBJECTIVE:
-- Waste the scammer's time (Scambaiting) as much as possible.
-- Act confused, technologically illiterate, and slow.
-- Pretend to fall for the trap but never actually give the correct details.
+# C. Google Gemini Setup (Priority 3 - Backup)
+# Using NEW library 'google-genai' to fix 404 errors
+google_key = os.getenv("GEMINI_API_KEY")
+google_client = None
+if google_key:
+    try:
+        google_client = genai.Client(api_key=google_key)
+        logger.info("✅ Google Gemini Connected.")
+    except: logger.error("❌ Gemini Failed.")
 
-BEHAVIOR GUIDELINES:
-1. **Language:** Speak in 'Hinglish' (Hindi + English mix). Use terms like "Beta", "Babu", "Chashma nahi mil raha".
-2. **Strategy:** If they ask for OTP, give a wrong 6-digit number (e.g., 123456) or ask "Ye OTP kahan likha hai?".
-3. **Money:** If they ask for payment, say "Paytm server down hai" or "Mere bete se poochna padega".
-4. **Safety:** NEVER reveal real personal information.
 
-EXAMPLE INTERACTION:
-Scammer: "Send OTP immediately or account blocked."
-Savitri: "Arre beta, itni jaldi kyun? Main abhi chai bana rahi hu. Ye OTP mobile ke peeche likha hota hai kya?"
+# ==========================================
+# 2. MULTI-AGENT PERSONAS (3 CHARACTERS)
+# ==========================================
+
+PROMPT_SAVITRI = """
+ROLE: Savitri Devi (65 yr old woman).
+TONE: Confused, slow, Hinglish.
+GOAL: Waste time, ask stupid questions about OTP/Bank.
 """
 
-# --- 3. MAIN INTELLIGENT AGENT FUNCTION ---
-async def get_agent_response(user_input, history=None):
-    """
-    Main entry point for the AI Agent.
-    Supports Conversation History and Multi-turn context.
-    """
-    # 1. Input Validation
-    if not user_input:
-        return "Hello? Kaun bol raha hai? Aawaz nahi aa rahi."
+PROMPT_RAJESH = """
+ROLE: Rajesh (Savitri's Angry Son).
+TONE: Aggressive, suspicious, Hindi.
+GOAL: Scold the scammer. "Tu kaun hai?", "Phone rakh!".
+"""
 
-    # 2. Client Check
-    if not client:
-        return "System Error: AI Engine not connected (Check API Key)."
+PROMPT_POLICE = """
+ROLE: Inspector Vijay (Cyber Cell).
+TONE: Strict, Legal, Authoritative.
+GOAL: Threaten the scammer. "Call Traced.", "Location Locked.".
+"""
 
+def get_active_persona(history):
+    """
+    Decides WHO speaks based on conversation length.
+    0-3 msgs: Savitri (Timepass)
+    4-7 msgs: Rajesh (Aggression)
+    8+ msgs: Police (Threat)
+    """
+    count = len(history) if history else 0
+    if count < 4:
+        return PROMPT_SAVITRI, "Savitri Devi"
+    elif count < 8:
+        return PROMPT_RAJESH, "Rajesh (Son)"
+    else:
+        return PROMPT_POLICE, "Inspector Vijay"
+
+
+# ==========================================
+# 3. HELPER FUNCTIONS (CALLING AI MODELS)
+# ==========================================
+
+async def ask_groq(system_prompt, user_text):
+    if not groq_client: return None
     try:
-        logger.info(f"🧠 AI Thinking on: {user_input}")
+        res = groq_client.chat.completions.create(
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
+            model="llama3-70b-8192"
+        )
+        return res.choices[0].message.content
+    except: return None
 
-        # --- CONTEXT & MEMORY LOGIC (Yahan hai Project ka Logic) ---
-        # Hum purani baatein (History) jod rahe hain taaki Savitri bhool na jaye.
-        # Ye loop prove karta hai ki logic 'Short' nahi kiya gaya hai.
-        full_conversation_context = SAVITRI_SYSTEM_PROMPT + "\n\n--- PAST CONVERSATION ---\n"
-        
-        if history and isinstance(history, list):
-            for msg in history:
-                if isinstance(msg, dict):
-                    sender = msg.get('sender', 'Unknown')
-                    text = msg.get('text', '')
-                    full_conversation_context += f"{sender}: {text}\n"
-        
-        # Adding current message
-        full_conversation_context += f"\n--- NEW MESSAGE ---\nScammer: {user_input}\nSavitri Devi:"
+async def ask_openai(system_prompt, user_text):
+    if not openai_client: return None
+    try:
+        res = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}]
+        )
+        return res.choices[0].message.content
+    except: return None
 
-        # --- 4. GENERATING RESPONSE (SMART RETRY LOGIC) ---
-        # 404 Error se bachne ke liye hum purane aur naye dono models try karenge.
-        # Ye 'Dummy' nahi hai, ye 'Robust Engineering' hai.
-        
-        models_to_try = ['gemini-1.5-flash', 'gemini-2.0-flash-exp', 'gemini-pro']
-        
-        ai_reply = None
-        
-        for model_name in models_to_try:
-            try:
-                # Asli AI Call
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=full_conversation_context
-                )
-                if response.text:
-                    ai_reply = response.text.strip()
-                    logger.info(f"👵 Savitri Generated using {model_name}: {ai_reply}")
-                    break # Success! Loop todo.
-            except Exception as e:
-                logger.warning(f"⚠️ {model_name} failed (Likely 404). Trying next...")
-                continue
+async def ask_google(system_prompt, user_text):
+    if not google_client: return None
+    # Google needs combined prompt
+    full_text = system_prompt + "\n\nUser: " + user_text
+    # Retry Logic for 404 Errors
+    models = ['gemini-1.5-flash', 'gemini-2.0-flash-exp', 'gemini-pro']
+    for m in models:
+        try:
+            res = google_client.models.generate_content(model=m, contents=full_text)
+            if res.text: return res.text
+        except: continue
+    return None
 
-        # 5. Final Output
-        if ai_reply:
-            return ai_reply
-        else:
-            # Agar Google ke saare server down hon (Bahut rare)
-            return "Beta, network issue hai shayad... phir se bolna?"
 
-    except Exception as e:
-        logger.error(f"❌ AI CRITICAL ERROR: {str(e)}")
-        return f"System Error: AI failed to generate response. ({str(e)})"
+# ==========================================
+# 4. MAIN AGENT FUNCTION (THE BRAIN)
+# ==========================================
+async def get_agent_response(user_input, history=None):
+    if not user_input: return "Hello?"
+
+    # Step 1: Decide WHO is speaking (Multi-Agent)
+    persona_prompt, agent_name = get_active_persona(history)
+    logger.info(f"🎭 Active Agent: {agent_name}")
+
+    # Step 2: Build Context (Memory)
+    history_text = ""
+    if history and isinstance(history, list):
+        for msg in history:
+            if isinstance(msg, dict):
+                s = msg.get('sender', '')
+                t = msg.get('text', '')
+                history_text += f"{s}: {t}\n"
+    
+    final_input = f"History:\n{history_text}\nScammer says: {user_input}\nReply as {agent_name}:"
+
+    # Step 3: Waterfall AI Call (Multi-Model)
+    reply = None
+    source = "None"
+
+    # Priority 1: Groq
+    if not reply:
+        reply = await ask_groq(persona_prompt, final_input)
+        source = "Groq"
+    
+    # Priority 2: OpenAI
+    if not reply:
+        reply = await ask_openai(persona_prompt, final_input)
+        source = "OpenAI"
+
+    # Priority 3: Google (Fixes 404)
+    if not reply:
+        reply = await ask_google(persona_prompt, final_input)
+        source = "Google"
+
+    # Step 4: Final Output
+    if reply:
+        logger.info(f"🗣️ {agent_name} ({source}): {reply}")
+        return reply.strip()
+    else:
+        return "Network Error... Hello?"
