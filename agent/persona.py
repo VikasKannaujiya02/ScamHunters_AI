@@ -1,17 +1,18 @@
 import os
 import logging
-from google import genai        # New Google Library
-from openai import OpenAI       # OpenAI Library
-from groq import Groq           # Groq Library
+import random
+from google import genai
+from groq import Groq
+from openai import OpenAI
 
-# Logger Setup
-logger = logging.getLogger("ScamHunters_Ultimate")
+# Logger
+logger = logging.getLogger("ScamHunters_Priority")
 
 # ==========================================
-# 1. SETUP ALL AI CLIENTS (MULTI-MODEL)
+# 1. SETUP ALL 3 CLIENTS
 # ==========================================
 
-# A. Groq Setup (Priority 1 - Fastest)
+# A. Groq (Fastest)
 groq_key = os.getenv("GROQ_API_KEY")
 groq_client = None
 if groq_key:
@@ -20,7 +21,16 @@ if groq_key:
         logger.info("✅ Groq Connected.")
     except: logger.error("❌ Groq Failed.")
 
-# B. OpenAI Setup (Priority 2 - Smartest)
+# B. Google (New Library)
+google_key = os.getenv("GEMINI_API_KEY")
+google_client = None
+if google_key:
+    try:
+        google_client = genai.Client(api_key=google_key)
+        logger.info("✅ Gemini Connected.")
+    except: logger.error("❌ Gemini Failed.")
+
+# C. OpenAI (Last Backup)
 openai_key = os.getenv("OPENAI_API_KEY")
 openai_client = None
 if openai_key:
@@ -29,136 +39,111 @@ if openai_key:
         logger.info("✅ OpenAI Connected.")
     except: logger.error("❌ OpenAI Failed.")
 
-# C. Google Gemini Setup (Priority 3 - Backup)
-# Using NEW library 'google-genai' to fix 404 errors
-google_key = os.getenv("GEMINI_API_KEY")
-google_client = None
-if google_key:
-    try:
-        google_client = genai.Client(api_key=google_key)
-        logger.info("✅ Google Gemini Connected.")
-    except: logger.error("❌ Gemini Failed.")
-
-
 # ==========================================
-# 2. MULTI-AGENT PERSONAS (3 CHARACTERS)
+# 2. MULTI-AGENT PERSONAS (3 Log)
 # ==========================================
+PERSONAS = {
+    "Savitri": "You are Savitri Devi, 65. Confused old lady. Speak Hinglish. Waste time. NEVER give real OTP.",
+    "Rajesh": "You are Rajesh, Savitri's son. Angry. Abuse the scammer. 'Tu kaun hai?', 'Police bulaunga'.",
+    "Police": "You are Inspector Vijay. Cyber Cell. 'Call Traced', 'Location Locked', 'Surrender now'."
+}
 
-PROMPT_SAVITRI = """
-ROLE: Savitri Devi (65 yr old woman).
-TONE: Confused, slow, Hinglish.
-GOAL: Waste time, ask stupid questions about OTP/Bank.
-"""
-
-PROMPT_RAJESH = """
-ROLE: Rajesh (Savitri's Angry Son).
-TONE: Aggressive, suspicious, Hindi.
-GOAL: Scold the scammer. "Tu kaun hai?", "Phone rakh!".
-"""
-
-PROMPT_POLICE = """
-ROLE: Inspector Vijay (Cyber Cell).
-TONE: Strict, Legal, Authoritative.
-GOAL: Threaten the scammer. "Call Traced.", "Location Locked.".
-"""
-
-def get_active_persona(history):
-    """
-    Decides WHO speaks based on conversation length.
-    0-3 msgs: Savitri (Timepass)
-    4-7 msgs: Rajesh (Aggression)
-    8+ msgs: Police (Threat)
-    """
+def get_active_agent(history):
     count = len(history) if history else 0
-    if count < 4:
-        return PROMPT_SAVITRI, "Savitri Devi"
-    elif count < 8:
-        return PROMPT_RAJESH, "Rajesh (Son)"
-    else:
-        return PROMPT_POLICE, "Inspector Vijay"
-
+    if count < 4: return "Savitri", PERSONAS["Savitri"]
+    elif count < 8: return "Rajesh", PERSONAS["Rajesh"]
+    else: return "Police", PERSONAS["Police"]
 
 # ==========================================
-# 3. HELPER FUNCTIONS (CALLING AI MODELS)
+# 3. LOCAL FALLBACK (Safety Net)
 # ==========================================
+def get_local_fallback(agent_name, user_text):
+    txt = user_text.lower()
+    if agent_name == "Savitri":
+        if "otp" in txt: return "Beta, OTP toh mobile ke peeche nahi likha..."
+        return "Beta aawaz kat rahi hai... hello?"
+    if agent_name == "Rajesh":
+        return "Oye! Dobara phone kiya toh taange tod dunga!"
+    if agent_name == "Police":
+        return "This number is under surveillance. Disconnect immediately."
+    return "..."
 
-async def ask_groq(system_prompt, user_text):
+# ==========================================
+# 4. AI CALL FUNCTIONS
+# ==========================================
+async def ask_groq(sys_prompt, user_text):
     if not groq_client: return None
     try:
         res = groq_client.chat.completions.create(
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
-            model="llama3-70b-8192"
+            messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_text}],
+            model="llama3-8b-8192"
         )
         return res.choices[0].message.content
     except: return None
 
-async def ask_openai(system_prompt, user_text):
-    if not openai_client: return None
-    try:
-        res = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}]
-        )
-        return res.choices[0].message.content
-    except: return None
-
-async def ask_google(system_prompt, user_text):
+async def ask_google(sys_prompt, user_text):
     if not google_client: return None
-    # Google needs combined prompt
-    full_text = system_prompt + "\n\nUser: " + user_text
-    # Retry Logic for 404 Errors
+    full = f"{sys_prompt}\n\nUser: {user_text}"
     models = ['gemini-1.5-flash', 'gemini-2.0-flash-exp', 'gemini-pro']
     for m in models:
         try:
-            res = google_client.models.generate_content(model=m, contents=full_text)
+            res = google_client.models.generate_content(model=m, contents=full)
             if res.text: return res.text
         except: continue
     return None
 
+async def ask_openai(sys_prompt, user_text):
+    if not openai_client: return None
+    try:
+        # OpenAI ko last me rakha hai, agar 429 aaye toh catch karke ignore karega
+        res = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_text}]
+        )
+        return res.choices[0].message.content
+    except: return None
 
 # ==========================================
-# 4. MAIN AGENT FUNCTION (THE BRAIN)
+# 5. MAIN AGENT LOGIC (WATERFALL)
 # ==========================================
 async def get_agent_response(user_input, history=None):
     if not user_input: return "Hello?"
 
-    # Step 1: Decide WHO is speaking (Multi-Agent)
-    persona_prompt, agent_name = get_active_persona(history)
-    logger.info(f"🎭 Active Agent: {agent_name}")
+    # 1. Choose Agent
+    agent_name, sys_prompt = get_active_agent(history)
+    logger.info(f"🎭 Active: {agent_name}")
 
-    # Step 2: Build Context (Memory)
-    history_text = ""
-    if history and isinstance(history, list):
-        for msg in history:
-            if isinstance(msg, dict):
-                s = msg.get('sender', '')
-                t = msg.get('text', '')
-                history_text += f"{s}: {t}\n"
+    # Build Context
+    hist_txt = ""
+    if history:
+        for m in history: 
+            if isinstance(m, dict): hist_txt += f"{m.get('sender','')}: {m.get('text','')}\n"
     
-    final_input = f"History:\n{history_text}\nScammer says: {user_input}\nReply as {agent_name}:"
+    final_input = f"History:\n{hist_txt}\nScammer: {user_input}\nReply as {agent_name}:"
 
-    # Step 3: Waterfall AI Call (Multi-Model)
     reply = None
     source = "None"
 
-    # Priority 1: Groq
+    # Priority 1: Groq (Fastest)
     if not reply:
-        reply = await ask_groq(persona_prompt, final_input)
+        reply = await ask_groq(sys_prompt, final_input)
         source = "Groq"
-    
-    # Priority 2: OpenAI
-    if not reply:
-        reply = await ask_openai(persona_prompt, final_input)
-        source = "OpenAI"
 
-    # Priority 3: Google (Fixes 404)
+    # Priority 2: Google (Reliable)
     if not reply:
-        reply = await ask_google(persona_prompt, final_input)
+        reply = await ask_google(sys_prompt, final_input)
         source = "Google"
 
-    # Step 4: Final Output
-    if reply:
-        logger.info(f"🗣️ {agent_name} ({source}): {reply}")
-        return reply.strip()
-    else:
-        return "Network Error... Hello?"
+    # Priority 3: OpenAI (Last Option - Jaise tumne bola)
+    if not reply:
+        reply = await ask_openai(sys_prompt, final_input)
+        source = "OpenAI"
+
+    # Final Safety: Local Script
+    if not reply:
+        logger.warning("⚠️ All AI Failed. Using Local.")
+        reply = get_local_fallback(agent_name, user_input)
+        source = "Local"
+
+    logger.info(f"🗣️ Answer via {source}")
+    return reply.strip()
