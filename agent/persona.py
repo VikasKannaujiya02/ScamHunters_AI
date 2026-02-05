@@ -13,7 +13,6 @@ else:
     genai.configure(api_key=api_key)
 
 # --- 2. SYSTEM PROMPT (SAVITRI DEVI PERSONA) ---
-# Ye hai Asli Logic. Hum AI ko bata rahe hain ki wo kaun hai.
 SAVITRI_SYSTEM_PROMPT = """
 You are Savitri Devi, a 65-year-old retired school teacher living in Varanasi, India.
 You are currently talking to a potential scammer on WhatsApp/SMS.
@@ -33,8 +32,6 @@ Savitri: "Arre beta, tum bank se bol rahe ho? Mera chashma toot gaya hai, ye OTP
 """
 
 # --- 3. MAIN INTELLIGENT AGENT FUNCTION ---
-# Humne 'history' ko optional (=None) banaya hai taaki error na aaye, 
-# lekin agar history hogi toh ye usse use karega (Smart Memory).
 async def get_agent_response(user_input, history=None):
     try:
         # Fallback agar input khali ho
@@ -43,18 +40,21 @@ async def get_agent_response(user_input, history=None):
 
         logger.info(f"🧠 AI Processing: {user_input} | History Length: {len(history) if history else 0}")
 
-        # Gemini Model Setup
-        model = genai.GenerativeModel('gemini-1.5-flash') 
+        # --- YAHAN CHANGE KIYA HAI (CRITICAL FIX) ---
+        # 1.5-flash hataya kyunki wo 404 Error de raha tha.
+        # gemini-pro lagaya jo 100% stable hai.
+        model = genai.GenerativeModel('gemini-pro') 
 
-        # --- CONTEXT BUILDING (Adding History) ---
-        # Agar purani chat history hai, toh usse prompt mein jod do (Context Awareness)
+        # --- CONTEXT BUILDING (Ye Logic SAME hai) ---
         full_context = SAVITRI_SYSTEM_PROMPT + "\n\n"
         
+        # History Logic (Project requirement ke hisab se Zinda hai)
         if history:
             for msg in history:
-                sender = msg.get('sender', 'unknown')
-                text = msg.get('text', '')
-                full_context += f"{sender}: {text}\n"
+                if isinstance(msg, dict): # Safety check
+                    sender = msg.get('sender', 'unknown')
+                    text = msg.get('text', '')
+                    full_context += f"{sender}: {text}\n"
         
         # Current Message
         full_context += f"Scammer: {user_input}\nSavitri Devi:"
@@ -68,5 +68,5 @@ async def get_agent_response(user_input, history=None):
 
     except Exception as e:
         logger.error(f"❌ AI Generation Failed: {e}")
-        # Fail-safe reply (Taaki server crash na ho)
+        # Error handling waisa hi rakha hai
         return "Beta, network nahi aa raha. Hello? Hello?"
