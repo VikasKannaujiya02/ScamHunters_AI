@@ -10,3 +10,6 @@ streamlit
 plotly
 google-genai
 python-multipart
+openai
+groq
+anthropic
