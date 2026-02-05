@@ -5,71 +5,72 @@ from groq import Groq
 from openai import OpenAI
 
 # Logger
-logger = logging.getLogger("ScamHunters_Finalv2")
+logger = logging.getLogger("ScamHunters_Stealth")
 
 # ==========================================
-# 1. API CLIENT SETUP
+# 1. API CLIENT SETUP (SAME AS BEFORE)
 # ==========================================
-
-# A. Groq (Priority 1: Fastest)
 groq_key = os.getenv("GROQ_API_KEY")
-groq_client = None
-if groq_key:
-    try:
-        groq_client = Groq(api_key=groq_key)
-        logger.info("✅ Groq Connected.")
-    except: logger.error("❌ Groq Failed.")
+groq_client = Groq(api_key=groq_key) if groq_key else None
 
-# B. Google Gemini (Priority 2: Reliable)
 google_key = os.getenv("GEMINI_API_KEY")
-google_client = None
-if google_key:
-    try:
-        google_client = genai.Client(api_key=google_key)
-        logger.info("✅ Gemini Connected.")
-    except: logger.error("❌ Gemini Failed.")
+google_client = genai.Client(api_key=google_key) if google_key else None
 
-# C. OpenAI (Priority 3: Backup)
 openai_key = os.getenv("OPENAI_API_KEY")
-openai_client = None
-if openai_key:
-    try:
-        openai_client = OpenAI(api_key=openai_key)
-        logger.info("✅ OpenAI Connected.")
-    except: logger.error("❌ OpenAI Failed.")
-
+openai_client = OpenAI(api_key=openai_key) if openai_key else None
 
 # ==========================================
-# 2. MULTI-AGENT PERSONAS
+# 2. STEALTH PERSONAS (NO POLICE - ONLY VICTIMS)
 # ==========================================
-PERSONAS = {
-    "Savitri": "You are Savitri Devi, 65. Confused old lady. Speak Hinglish. Waste time. Ask stupid questions. NEVER share OTP.",
-    "Rajesh": "You are Rajesh, Savitri's son. Angry. Abuse the scammer. 'Tu kaun hai?', 'Police bulaunga'.",
-    "Police": "You are Inspector Vijay. Cyber Cell. 'Call Traced', 'Location Locked', 'Surrender immediately'."
-}
+
+# 1. Savitri (The Bait): Confused, keeps asking "Kaise karu?"
+PROMPT_SAVITRI = """
+ROLE: You are Savitri Devi, 65-year-old retired woman.
+GOAL: Act extremely confused and technically illiterate. Keep the scammer engaged.
+STRATEGY:
+- Never say "No". Say "I am trying but it's not working".
+- Ask them to repeat details (forces them to reveal UPI/Bank info again).
+- Speak in Hinglish: "Beta, chashma nahi mil raha", "Button kaunsa dabana hai?".
+- NEVER reveal that you know it is a scam.
+"""
+
+# 2. Rajesh (The Extractor): Pretends to help mom, asks for specific payment details.
+PROMPT_RAJESH = """
+ROLE: Rajesh, Savitri's son. You are skeptical but willing to pay if verified.
+GOAL: Extract more Bank Accounts and UPI IDs from the scammer.
+STRATEGY:
+- Do NOT threaten them. Act like a busy man who just wants to finish this.
+- Say things like: "Maa se nahi ho raha. Send me the UPI ID again, I will do it from my phone."
+- Say: "This server is down. Do you have another bank account number?"
+- Keep asking for "Alternative Payment Methods" to collect more intelligence.
+- NEVER say you are Police. Pretend you are falling for the trap.
+"""
 
 def get_active_agent(history):
+    """
+    Decides WHO speaks based on conversation length.
+    Maintains stealth mode.
+    """
     count = len(history) if history else 0
-    if count < 4: return "Savitri", PERSONAS["Savitri"]
-    elif count < 8: return "Rajesh", PERSONAS["Rajesh"]
-    else: return "Police", PERSONAS["Police"]
+    
+    # Pehle 5 message tak Savitri (Time Waste)
+    if count < 5:
+        return "Savitri", PROMPT_SAVITRI
+    
+    # Uske baad Rajesh (Intelligence Extraction)
+    # Rajesh scammer se aur details maangega "Pay" karne ke bahane.
+    else:
+        return "Rajesh (Son)", PROMPT_RAJESH
 
 
 # ==========================================
-# 3. AI GENERATION FUNCTIONS (UPDATED MODELS)
+# 3. AI GENERATION FUNCTIONS (Unchanged)
 # ==========================================
 
 async def ask_groq(sys_prompt, user_text):
     if not groq_client: return None
-    
-    # --- UPDATED MODEL LIST (OLD WALA EXPIRE HO GAYA THA) ---
-    models = [
-        "llama-3.3-70b-versatile",  # Latest & Best
-        "llama-3.1-70b-versatile",  # Backup
-        "llama-3.1-8b-instant",     # Fastest
-        "mixtral-8x7b-32768"        # Alternative
-    ]
-    
+    # Updated Models List
+    models = ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile", "llama-3.1-8b-instant"]
     for m in models:
         try:
             res = groq_client.chat.completions.create(
@@ -77,28 +78,16 @@ async def ask_groq(sys_prompt, user_text):
                 model=m
             )
             return res.choices[0].message.content
-        except Exception as e:
-            logger.warning(f"⚠️ Groq Model {m} Failed: {e}")
-            continue # Try next model
-            
+        except: continue
     return None
 
 async def ask_google(sys_prompt, user_text):
     if not google_client: return None
-    full_prompt = f"{sys_prompt}\n\nUser: {user_text}"
-    
-    # Google Models List (Retry Logic)
-    models = [
-        'gemini-1.5-flash',
-        'gemini-1.5-flash-001',
-        'gemini-2.0-flash-exp',
-        'gemini-pro',
-        'gemini-1.0-pro'
-    ]
-    
+    full = f"{sys_prompt}\n\nUser: {user_text}"
+    models = ['gemini-1.5-flash', 'gemini-1.5-flash-001', 'gemini-2.0-flash-exp', 'gemini-pro', 'gemini-1.0-pro']
     for m in models:
         try:
-            res = google_client.models.generate_content(model=m, contents=full_prompt)
+            res = google_client.models.generate_content(model=m, contents=full)
             if res.text: return res.text
         except: continue
     return None
@@ -113,16 +102,15 @@ async def ask_openai(sys_prompt, user_text):
         return res.choices[0].message.content
     except: return None
 
-
 # ==========================================
 # 4. MAIN AGENT LOGIC
 # ==========================================
 async def get_agent_response(user_input, history=None):
     if not user_input: return "Hello?"
 
-    # 1. Identify Agent
+    # 1. Identify Agent (Savitri or Rajesh) - NO POLICE
     agent_name, sys_prompt = get_active_agent(history)
-    logger.info(f"🎭 Speaking as: {agent_name}")
+    logger.info(f"🎭 Speaking as: {agent_name} (Stealth Mode)")
 
     # 2. History Context
     hist_txt = ""
@@ -135,23 +123,9 @@ async def get_agent_response(user_input, history=None):
     reply = None
     source = "None"
 
-    # Attempt 1: Groq (Updated Models)
-    if not reply:
-        reply = await ask_groq(sys_prompt, final_input)
-        source = "Groq"
+    # Execution Strategy
+    if not reply: reply = await ask_groq(sys_prompt, final_input)
+    if not reply: reply = await ask_google(sys_prompt, final_input)
+    if not reply: reply = await ask_openai(sys_prompt, final_input)
 
-    # Attempt 2: Google (Backup)
-    if not reply:
-        reply = await ask_google(sys_prompt, final_input)
-        source = "Google"
-
-    # Attempt 3: OpenAI (Last Resort)
-    if not reply:
-        reply = await ask_openai(sys_prompt, final_input)
-        source = "OpenAI"
-
-    if reply:
-        logger.info(f"🗣️ Generated via {source}")
-        return reply.strip()
-    else:
-        return "System Error: All AI Models Failed."
+    return reply.strip() if reply else "System Error: AI Unreachable."
