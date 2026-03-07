@@ -19,7 +19,7 @@ logger = logging.getLogger("ScamHunters_Core_Pro")
 
 app = FastAPI(title="ScamHunters Agentic Honeypot")
 
-# CORS Setup
+# CORS Setup - Ye sab kuch allow karega
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -126,15 +126,22 @@ async def handover_to_agent_and_report(session_id, user_text, history):
 
     return ai_reply, risk_score
 
-# --- 4. MAIN API ENDPOINT ---
-@app.api_route("/api/chat", methods=["GET", "POST"])
+# --- 4. MAIN API ENDPOINT (UPGRADED) ---
+# FIX: Sab methods allow kar diye aur rasta seedha /chat kar diya
+@app.api_route("/chat", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"])
 async def chat_endpoint(request: Request, background_tasks: BackgroundTasks):
     if request.headers.get("x-api-key") != "12345": 
         pass 
 
     try:
-        try: data = await request.json()
-        except: data = dict(await request.form())
+        # FIX: Agar request empty aati hai (jaise OPTIONS/GET mein) toh crash na ho
+        try: 
+            data = await request.json()
+        except: 
+            try: 
+                data = dict(await request.form())
+            except: 
+                data = {} # Safe fallback
         
         logger.info(f"📩 Incoming Data: {data}")
         
